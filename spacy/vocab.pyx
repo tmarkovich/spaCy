@@ -179,7 +179,7 @@ cdef class Vocab:
             raise ValueError(Errors.E085.format(string=string))
         return lex
 
-    cdef int clear(self) except -1:
+    def clear(self):
         """
         First, we iterate through all the orthogonal forms of the tokens and
         search for the ones that have been flagged as 64. This flag represents
@@ -196,7 +196,7 @@ cdef class Vocab:
         the prehash map by one.
         """
         print("In Clear")
-        for k, v in self._by_orth.keys():
+        for k, v in self._by_orth.items():
             if v.flags == 64:
                 print("freeing k={}".format(k))
                 self.mem.free(<Utf8Str*>self.strings._map.get(k))
