@@ -108,3 +108,6 @@ Desktop.ini
 
 # Pycharm project files
 *.idea
+
+sandbox/
+env3.6/

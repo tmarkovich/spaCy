@@ -42,4 +42,6 @@ cdef class Vocab:
     cdef int _add_lex_to_vocab(self, hash_t key, const LexemeC* lex) except -1
     cdef const LexemeC* _new_lexeme(self, Pool mem, unicode string) except NULL
 
+    cdef int clear(self) except -1
+
     cdef public PreshMap _by_orth

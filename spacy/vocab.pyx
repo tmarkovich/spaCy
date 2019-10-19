@@ -13,6 +13,7 @@ from .lexeme cimport Lexeme
 from .typedefs cimport attr_t
 from .tokens.token cimport Token
 from .attrs cimport PROB, LANG, ORTH, TAG, POS
+from .strings cimport Utf8Str
 from .structs cimport SerializedLexemeC
 
 from .compat import copy_reg, basestring_
@@ -32,7 +33,7 @@ cdef class Vocab:
     DOCS: https://spacy.io/api/vocab
     """
     def __init__(self, lex_attr_getters=None, tag_map=None, lemmatizer=None,
-                 strings=tuple(), oov_prob=-20., **deprecated_kwargs):
+                 strings=tuple(), oov_prob=-20., train=False, **deprecated_kwargs):
         """Create the vocabulary.
 
         lex_attr_getters (dict): A dictionary mapping attribute IDs to
@@ -44,6 +45,7 @@ cdef class Vocab:
             vice versa.
         RETURNS (Vocab): The newly constructed object.
         """
+        self._train = train
         lex_attr_getters = lex_attr_getters if lex_attr_getters is not None else {}
         tag_map = tag_map if tag_map is not None else {}
         if lemmatizer in (None, True, False):
@@ -157,6 +159,8 @@ cdef class Vocab:
         cdef bint is_oov = mem is not self.mem
         lex = <LexemeC*>mem.alloc(sizeof(LexemeC), 1)
         lex.orth = self.strings.add(string)
+        if not self._train:
+            lex.flags = 64
         lex.length = len(string)
         if self.vectors is not None:
             lex.id = self.vectors.key2row.get(lex.orth, 0)
@@ -176,6 +180,31 @@ cdef class Vocab:
         if lex == NULL:
             raise ValueError(Errors.E085.format(string=string))
         return lex
+
+    cdef int clear(self) except -1:
+        """
+        First, we iterate through all the orthogonal forms of the tokens and
+        search for the ones that have been flagged as 64. This flag represents
+        tokens that were OOV for this model but have been encountered during
+        runtime.
+
+        When we find such a (orthogonal form, lexeme) pair, we first remove
+        the character from the strings
+
+        Next, we pop off the lexeme from the _by_orth prehash map that stores
+        maps the orthogonal form to the lexeme itself
+
+        Finally, we decrement the count by one to indicate that we've shrunken
+        the prehash map by one.
+        """
+        for k, v in self._by_orth.keys():
+            if v.flags == 64:
+                self.mem.free(<Utf8Str*>self.strings._map.get(k))
+                self.strings.pop(k)
+                self.mem.free(<LexemeC*>v)
+                self._by_orth.pop(k)
+                self.length -= 1
+        return 0
 
     cdef int _add_lex_to_vocab(self, hash_t key, const LexemeC* lex) except -1:
         self._by_orth.set(lex.orth, <void*>lex)
