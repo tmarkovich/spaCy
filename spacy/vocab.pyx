@@ -45,7 +45,6 @@ cdef class Vocab:
             vice versa.
         RETURNS (Vocab): The newly constructed object.
         """
-        self._train = train
         lex_attr_getters = lex_attr_getters if lex_attr_getters is not None else {}
         tag_map = tag_map if tag_map is not None else {}
         if lemmatizer in (None, True, False):
@@ -159,8 +158,7 @@ cdef class Vocab:
         cdef bint is_oov = mem is not self.mem
         lex = <LexemeC*>mem.alloc(sizeof(LexemeC), 1)
         lex.orth = self.strings.add(string)
-        if not self._train:
-            lex.flags = 64
+        lex.flags = 64
         lex.length = len(string)
         if self.vectors is not None:
             lex.id = self.vectors.key2row.get(lex.orth, 0)
@@ -197,8 +195,10 @@ cdef class Vocab:
         Finally, we decrement the count by one to indicate that we've shrunken
         the prehash map by one.
         """
+        print("In Clear")
         for k, v in self._by_orth.keys():
             if v.flags == 64:
+                print("freeing k={}".format(k))
                 self.mem.free(<Utf8Str*>self.strings._map.get(k))
                 self.strings.pop(k)
                 self.mem.free(<LexemeC*>v)
