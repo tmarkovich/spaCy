@@ -128,45 +128,52 @@ cdef class Vocab:
         """
         if string == "":
             return &EMPTY_LEXEME
-        cdef hash_t key
-        local = False
+
         if string in self.strings or self._train:
-            key = self.strings[string]
+            return self._get_train(mem, string)
         else:
-            key = self._strings_local[string]
-            local = True
+            return self._get_local(mem, string)
 
-        if local:
-            return self._get_local(mem, key)
-        else:
-            return self._get_train(mem, key)
-
-    cdef const LexemeC* _get_local(self, Pool mem, hash_t key) except NULL:
-        # Not training and didn't find the string in the string store
+    cdef const LexemeC* _get_local(self, Pool mem, unicode string) except NULL:
+        """Get a pointer to a `LexemeC` from the lexicon, creating a new
+        `Lexeme` if necessary using memory acquired from the given pool. If the
+        pool is the lexicon's own memory, the lexeme is saved in the lexicon.
+        """
+        if string == "":
+            return &EMPTY_LEXEME
         cdef LexemeC* lex
+        cdef hash_t key = self._strings_local[string]
         lex = <LexemeC*>self._by_orth_local.get(key)
+        cdef size_t addr
         if lex != NULL:
-            assert lex.orth in self.strings_local
+            assert lex.orth in self._strings_local
             if lex.orth != key:
-                raise KeyError(Errors.E064.format(
-                    string=lex.orth, orth=key, orth_id=string))
+                raise KeyError(Errors.E064.format(string=lex.orth,
+                                                  orth=key, orth_id=string))
             return lex
         else:
             return self._new_lexeme(mem, string)
 
-    cdef const LexemeC* _get_train(self, Pool mem, hash_t key) except NULL:
-        # Either training and thus, should add the lexeme to the corpus
-        # Or not training and found the query string in the stringstore
+    cdef const LexemeC* _get_train(self, Pool mem, unicode string) except NULL:
+        """Get a pointer to a `LexemeC` from the lexicon, creating a new
+        `Lexeme` if necessary using memory acquired from the given pool. If the
+        pool is the lexicon's own memory, the lexeme is saved in the lexicon.
+        """
+        if string == "":
+            return &EMPTY_LEXEME
         cdef LexemeC* lex
+        cdef hash_t key = self.strings[string]
         lex = <LexemeC*>self._by_orth.get(key)
+        cdef size_t addr
         if lex != NULL:
             assert lex.orth in self.strings
             if lex.orth != key:
-                raise KeyError(Errors.E064.format(
-                    string=lex.orth, orth=key, orth_id=string))
+                raise KeyError(Errors.E064.format(string=lex.orth,
+                                                  orth=key, orth_id=string))
             return lex
         else:
             return self._new_lexeme(mem, string)
+
 
     cdef const LexemeC* get_by_orth(self, Pool mem, attr_t orth) except NULL:
         """Get a pointer to a `LexemeC` from the lexicon, creating a new
@@ -189,7 +196,7 @@ cdef class Vocab:
                 if lex != NULL:
                     return lex
                 else:
-                    return self._new_lexeme(mem, self.strings_local[orth])
+                    return self._new_lexeme(mem, self._strings_local[orth])
             # If we are training, just add the string to the stringstore as expected
             else:
                 return self._new_lexeme(mem, self.strings[orth])
