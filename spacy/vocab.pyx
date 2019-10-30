@@ -33,7 +33,7 @@ cdef class Vocab:
     DOCS: https://spacy.io/api/vocab
     """
     def __init__(self, lex_attr_getters=None, tag_map=None, lemmatizer=None,
-                 strings=tuple(), oov_prob=-20., train=False, **deprecated_kwargs):
+                 strings=tuple(), oov_prob=-20., train=True, **deprecated_kwargs):
         """Create the vocabulary.
 
         lex_attr_getters (dict): A dictionary mapping attribute IDs to
@@ -129,7 +129,7 @@ cdef class Vocab:
         if string == "":
             return &EMPTY_LEXEME
 
-        if string in self.strings or self._train:
+        if (string in self.strings) or self._train:
             return self._get_train(mem, string)
         else:
             return self._get_local(mem, string)
@@ -207,9 +207,9 @@ cdef class Vocab:
         cdef bint is_oov = mem is not self.mem
         lex = <LexemeC*>mem.alloc(sizeof(LexemeC), 1)
         if self._train:
-            lex.orth = self.strings_local.add(string)
-        else:
             lex.orth = self.strings.add(string)
+        else:
+            lex.orth = self._strings_local.add(string)
         lex.flags = 64
         lex.length = len(string)
         if self.vectors is not None:
@@ -220,7 +220,10 @@ cdef class Vocab:
             for attr, func in self.lex_attr_getters.items():
                 value = func(string)
                 if isinstance(value, unicode):
-                    value = self.strings.add(value)
+                    if self._train:
+                        value = self.strings.add(value)
+                    else:
+                        value = self._strings_local.add(string)
                 if attr == PROB:
                     lex.prob = value
                 elif value is not None:
@@ -247,10 +250,18 @@ cdef class Vocab:
         Finally, we decrement the count by one to indicate that we've shrunken
         the prehash map by one.
         """
-        print("In Clear")
+
         self._strings_local = StringStore()
         self._by_orth_local = PreshMap()
         return 0
+
+    def enable_training(self):
+        self._train = True
+
+    def disable_training(self):
+        print("training: {}".format(self._train))
+        self._train = False
+        print("training: {}".format(self._train))
 
     cdef int _add_lex_to_vocab(self, hash_t key, const LexemeC* lex) except -1:
         if not self._train:
@@ -269,9 +280,15 @@ cdef class Vocab:
         """
         cdef hash_t int_key
         if isinstance(key, bytes):
-            int_key = self.strings[key.decode("utf8")]
+            if (key.decode("utf8") in self.strings):
+                int_key = self.strings[key.decode("utf8")]
+            elif (key.decode("utf8") in self._strings_local):
+                int_key = self._strings_local[key.decode("utf8")]
         elif isinstance(key, unicode):
-            int_key = self.strings[key]
+            if key in self.strings:
+                int_key = self.strings[key]
+            elif key in self._strings_local:
+                int_key = self.strings[key]
         else:
             int_key = key
         lex = self._by_orth.get(int_key)
@@ -307,9 +324,13 @@ cdef class Vocab:
 
         DOCS: https://spacy.io/api/vocab#getitem
         """
+        print("in getitem")
         cdef attr_t orth
         if isinstance(id_or_string, unicode):
-            orth = self.strings.add(id_or_string)
+            if self._train:
+                orth = self.strings.add(id_or_string)
+            else:
+                orth = self._strings_local.add(id_or_string)
         else:
             orth = id_or_string
         return Lexeme(self, orth)
@@ -414,6 +435,7 @@ cdef class Vocab:
 
         DOCS: https://spacy.io/api/vocab#get_vector
         """
+        print("Getting a vector for {}".format(orth))
         if isinstance(orth, basestring_):
             orth = self.strings.add(orth)
         word = self[orth].orth_
@@ -460,6 +482,7 @@ cdef class Vocab:
 
         DOCS: https://spacy.io/api/vocab#set_vector
         """
+        print("Setting a vector for {}".format(orth))
         if isinstance(orth, basestring_):
             orth = self.strings.add(orth)
         if self.vectors.is_full and orth not in self.vectors:
@@ -482,6 +505,7 @@ cdef class Vocab:
 
         DOCS: https://spacy.io/api/vocab#has_vector
         """
+        print("Testting a vector for {}".format(orth))
         if isinstance(orth, basestring_):
             orth = self.strings.add(orth)
         return orth in self.vectors
@@ -656,7 +680,6 @@ def pickle_vocab(vocab):
 
 def unpickle_vocab(sstore, vectors, morphology, data_dir,
                    lex_attr_getters, bytes lexemes_data, int length):
-    print("loading vocab")
     cdef Vocab vocab = Vocab()
     vocab._train = True
     vocab.length = length
@@ -668,7 +691,6 @@ def unpickle_vocab(sstore, vectors, morphology, data_dir,
     vocab.lexemes_from_bytes(lexemes_data)
     vocab.length = length
     vocab._train = False
-    print("loaded vocab. len(by_orth): {}, len(by_orth_local): {}".format(len(self.by_orth), len(self._by_orth_local)))
     return vocab
 
 
