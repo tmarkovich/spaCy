@@ -52,7 +52,10 @@ cdef class Vocab:
         self.cfg = {'oov_prob': oov_prob}
         self.mem = Pool()
         self._by_orth = PreshMap()
+        self._by_orth_local = PreshMap()
         self.strings = StringStore()
+        self._strings_local = StringStore()
+        self._train = train
         self.length = 0
         if strings:
             for string in strings:
@@ -125,15 +128,42 @@ cdef class Vocab:
         """
         if string == "":
             return &EMPTY_LEXEME
+        cdef hash_t key
+        local = False
+        if string in self.strings or self._train:
+            key = self.strings[string]
+        else:
+            key = self._strings_local[string]
+            local = True
+
+        if local:
+            return self._get_local(mem, key)
+        else:
+            return self._get_train(mem, key)
+
+    cdef const LexemeC* _get_local(self, Pool mem, hash_t key) except NULL:
+        # Not training and didn't find the string in the string store
         cdef LexemeC* lex
-        cdef hash_t key = self.strings[string]
+        lex = <LexemeC*>self._by_orth_local.get(key)
+        if lex != NULL:
+            assert lex.orth in self.strings_local
+            if lex.orth != key:
+                raise KeyError(Errors.E064.format(
+                    string=lex.orth, orth=key, orth_id=string))
+            return lex
+        else:
+            return self._new_lexeme(mem, string)
+
+    cdef const LexemeC* _get_train(self, Pool mem, hash_t key) except NULL:
+        # Either training and thus, should add the lexeme to the corpus
+        # Or not training and found the query string in the stringstore
+        cdef LexemeC* lex
         lex = <LexemeC*>self._by_orth.get(key)
-        cdef size_t addr
         if lex != NULL:
             assert lex.orth in self.strings
             if lex.orth != key:
-                raise KeyError(Errors.E064.format(string=lex.orth,
-                                                  orth=key, orth_id=string))
+                raise KeyError(Errors.E064.format(
+                    string=lex.orth, orth=key, orth_id=string))
             return lex
         else:
             return self._new_lexeme(mem, string)
@@ -150,7 +180,19 @@ cdef class Vocab:
         if lex != NULL:
             return lex
         else:
-            return self._new_lexeme(mem, self.strings[orth])
+            # next check in the local by_orth table if we're not training.
+            # We need to be careful to look in the strings_local store
+            # and not the global store. Note, this workaround is only
+            # necessary because spacy implemented a custom [] operator
+            if not self._train:
+                lex = <LexemeC*>self._by_orth_local.get(orth)
+                if lex != NULL:
+                    return lex
+                else:
+                    return self._new_lexeme(mem, self.strings_local[orth])
+            # If we are training, just add the string to the stringstore as expected
+            else:
+                return self._new_lexeme(mem, self.strings[orth])
 
     cdef const LexemeC* _new_lexeme(self, Pool mem, unicode string) except NULL:
         if len(string) < 3 or self.length < 10000:
@@ -196,19 +238,16 @@ cdef class Vocab:
         the prehash map by one.
         """
         print("In Clear")
-        for k, v in self._by_orth.items():
-            if v.flags == 64:
-                print("freeing k={}".format(k))
-                self.mem.free(<Utf8Str*>self.strings._map.get(k))
-                self.strings.pop(k)
-                self.mem.free(<LexemeC*>v)
-                self._by_orth.pop(k)
-                self.length -= 1
+        self._strings_local = StringStore()
+        self._by_orth_local = PreshMap()
         return 0
 
     cdef int _add_lex_to_vocab(self, hash_t key, const LexemeC* lex) except -1:
-        self._by_orth.set(lex.orth, <void*>lex)
-        self.length += 1
+        if not self._train:
+            self._by_orth_local.set(lex.orth, <void*>lex)
+        else:
+            self._by_orth.set(lex.orth, <void*>lex)
+            self.length += 1
 
     def __contains__(self, key):
         """Check whether the string or int key has an entry in the vocabulary.
@@ -600,8 +639,9 @@ def pickle_vocab(vocab):
     data_dir = vocab.data_dir
     lex_attr_getters = srsly.pickle_dumps(vocab.lex_attr_getters)
     lexemes_data = vocab.lexemes_to_bytes()
+    train = vocab._train
     return (unpickle_vocab,
-            (sstore, vectors, morph, data_dir, lex_attr_getters, lexemes_data, length))
+            (sstore, vectors, morph, data_dir, lex_attr_getters, lexemes_data, length, train))
 
 
 def unpickle_vocab(sstore, vectors, morphology, data_dir,
