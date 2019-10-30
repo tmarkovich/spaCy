@@ -206,7 +206,10 @@ cdef class Vocab:
             mem = self.mem
         cdef bint is_oov = mem is not self.mem
         lex = <LexemeC*>mem.alloc(sizeof(LexemeC), 1)
-        lex.orth = self.strings.add(string)
+        if self._train:
+            lex.orth = self.strings_local.add(string)
+        else:
+            lex.orth = self.strings.add(string)
         lex.flags = 64
         lex.length = len(string)
         if self.vectors is not None:
@@ -653,7 +656,9 @@ def pickle_vocab(vocab):
 
 def unpickle_vocab(sstore, vectors, morphology, data_dir,
                    lex_attr_getters, bytes lexemes_data, int length):
+    print("loading vocab")
     cdef Vocab vocab = Vocab()
+    vocab._train = True
     vocab.length = length
     vocab.vectors = vectors
     vocab.strings = sstore
@@ -662,6 +667,8 @@ def unpickle_vocab(sstore, vectors, morphology, data_dir,
     vocab.lex_attr_getters = srsly.pickle_loads(lex_attr_getters)
     vocab.lexemes_from_bytes(lexemes_data)
     vocab.length = length
+    vocab._train = False
+    print("loaded vocab. len(by_orth): {}, len(by_orth_local): {}".format(len(self.by_orth), len(self._by_orth_local)))
     return vocab
 
 
